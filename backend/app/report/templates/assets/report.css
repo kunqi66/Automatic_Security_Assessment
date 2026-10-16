@@ -1,0 +1,184 @@
+/* B6 报告样式 —— 被内联进 <style>，不产生任何外部请求。
+ *
+ * 印刷相关规则（@page / page-break-inside）是给 pdf.py 的 Chromium 用的：
+ * Playwright 的 page.pdf() 会走打印媒体查询。同一份 CSS 服务屏幕与纸张，
+ * 这是选 Chromium 而不是 WeasyPrint 的附带收益（B6 设计 §7.1）——
+ * 报告在浏览器里看到的样子就是 PDF 的样子，不必为 PDF 单独维护一套样式。
+ */
+
+:root {
+  --ink: #111827;
+  --ink-2: #374151;
+  --ink-3: #6b7280;
+  --line: #e5e7eb;
+  --bg-soft: #f9fafb;
+  --critical: #c0392b;
+  --high: #e67e22;
+  --medium: #f1c40f;
+  --low: #27ae60;
+  --safe: #27ae60;
+  --info: #2980b9;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 32px 40px 64px;
+  color: var(--ink);
+  background: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+h1 { font-size: 24px; margin: 0 0 4px; }
+h2 {
+  font-size: 18px;
+  margin: 36px 0 12px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--ink);
+}
+h3 { font-size: 15px; margin: 20px 0 8px; }
+code {
+  font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  background: var(--bg-soft);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+pre {
+  background: var(--bg-soft);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--info);
+  border-radius: 4px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+pre code { background: none; padding: 0; }
+
+.report-header {
+  border-bottom: 3px solid var(--ink);
+  padding-bottom: 16px;
+  margin-bottom: 8px;
+}
+.report-header .meta { color: var(--ink-3); font-size: 12.5px; }
+.report-header .meta span { margin-right: 16px; }
+
+table { width: 100%; border-collapse: collapse; margin: 10px 0 16px; font-size: 13px; }
+th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: left; vertical-align: top; }
+th { background: var(--bg-soft); font-weight: 600; color: var(--ink-2); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.badge-critical { color: #fff; background: var(--critical); }
+.badge-high { color: #fff; background: var(--high); }
+.badge-medium { color: #4a3b00; background: var(--medium); }
+.badge-low { color: #fff; background: var(--low); }
+.badge-safe { color: #fff; background: var(--safe); }
+.badge-verified { color: #fff; background: var(--info); }
+.badge-unverified { color: var(--ink-2); background: #e5e7eb; }
+.badge-inferred { color: var(--ink-2); background: #f3f4f6; border-style: dashed; border-color: var(--ink-3); }
+.badge-template { color: #7c3aed; background: #f3e8ff; }
+
+.notice {
+  border-left: 4px solid var(--info);
+  background: #eff6ff;
+  padding: 10px 14px;
+  margin: 12px 0;
+  border-radius: 0 4px 4px 0;
+  font-size: 13px;
+}
+.notice.warn { border-color: var(--high); background: #fff7ed; }
+.notice.alert { border-color: var(--critical); background: #fef2f2; }
+.notice .title { font-weight: 700; display: block; margin-bottom: 2px; }
+
+.score-panel { display: flex; gap: 28px; align-items: center; flex-wrap: wrap; }
+.score-panel .facts { flex: 1 1 320px; }
+.score-panel .facts dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; margin: 0; }
+.score-panel .facts dt { color: var(--ink-3); font-size: 12.5px; }
+.score-panel .facts dd { margin: 0; font-size: 13px; }
+
+.chart-row { display: flex; gap: 36px; align-items: flex-start; flex-wrap: wrap; margin: 8px 0 4px; }
+.chart-row > * { flex: 0 0 auto; }
+
+.legend { list-style: none; margin: 8px 0; padding: 0; font-size: 12.5px; min-width: 220px; }
+.legend-item { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.legend-label { flex: 1 1 auto; }
+.legend-value { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+
+/* 漏洞卡片：打印时「不允许被分页切开」—— 一张被切成两页的证据卡
+ * （源码在上页、报文在下页）在评审会上是没法读的（B6 设计 §8 待定项 5）。 */
+.card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px 16px 8px;
+  margin: 14px 0;
+  page-break-inside: avoid;
+  break-inside: avoid;
+}
+.card > header { margin-bottom: 8px; }
+.card h3 { margin: 0; font-size: 15px; }
+
+.chain-node {
+  border-left: 3px solid var(--info);
+  padding: 6px 0 6px 12px;
+  margin: 8px 0;
+}
+/* Q24 定案 = 方案 A：已验证环实线主色，已推演环虚线淡化。
+ * 无颜色格式（Markdown）用文字前缀替代本配色，见 ChainNodeEntry.mark。 */
+.chain-node.inferred { border-left-style: dashed; border-left-color: var(--ink-3); opacity: 0.88; }
+.chain-node .node-head { font-weight: 600; font-size: 13.5px; }
+
+.degraded-banner {
+  border: 1px dashed var(--ink-3);
+  background: var(--bg-soft);
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  margin: 10px 0;
+}
+
+.taint-table td { font-size: 12.5px; }
+.taint-table .kind {
+  font-weight: 600;
+  color: var(--info);
+  white-space: nowrap;
+}
+
+.evidence { font-size: 12.5px; }
+.evidence .label { color: var(--ink-3); margin-right: 6px; }
+
+footer {
+  margin-top: 40px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+
+@page {
+  size: A4;
+  margin: 14mm 12mm 16mm;
+}
+@media print {
+  body { padding: 0; font-size: 12px; }
+  h2 { page-break-after: avoid; }
+  tr, .legend-item { page-break-inside: avoid; }
+  .card { border-color: #d1d5db; }
+  .no-print { display: none; }
+}

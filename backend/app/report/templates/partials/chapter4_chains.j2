@@ -1,0 +1,68 @@
+{#- 第 4 章 多步攻击路径推演（B6 设计 §4.4 第 4 行、呈现口径见 §4.5 / Q24 方案 A）。
+
+     **措辞约束**：本章用「验证 / 推演」二分，**不得**与 `vulnerabilities.status`
+     的 verified / unverified 混用，也不得写「未验证漏洞」这种歧义表述。
+
+     无攻击链时整章输出占位说明（L3：exploit_chain skipped），**不硬造**：
+     规则没匹配上就是没匹配上，编一条链比缺一章糟得多。 -#}
+<h2>4. 多步攻击路径推演</h2>
+
+{% if d.chapter4_placeholder %}
+<div class="notice">
+  <span class="title">本次未产出攻击链</span>
+  {{ d.chapter4_placeholder }}
+</div>
+{% else %}
+<div class="notice">
+  <span class="title">图例</span>
+  <strong>已验证环</strong>：已在沙箱中无害验证（实线主色）；
+  <strong>已推演环</strong>：由已证实的前置条件推演得出，未实际执行（虚线淡色）。
+  本系统可以推断「这里能打穿」，但不代为打穿。
+</div>
+
+{% for chain in d.chains %}
+<div class="card">
+  <header>
+    <h3>
+      {{ chain.name }}
+      {% if chain.severity %}<span class="badge badge-{{ chain.severity }}">{{ SEVERITY_LABEL[chain.severity] }}</span>{% endif %}
+      <span class="badge badge-verified">{{ chain.verified_count }} 环已验证</span>
+      <span class="badge badge-inferred">{{ chain.inferred_count }} 环已推演</span>
+    </h3>
+  </header>
+
+  <table>
+    <tbody>
+      <tr><th style="width:130px">入口点</th><td>{{ chain.entry_point or "未记录" }}</td></tr>
+      <tr><th>攻陷目标</th><td>{{ chain.target_asset or "未记录" }}</td></tr>
+      <tr><th>链置信度</th><td>{{ "%.2f"|format(chain.confidence) }}（由确定性推演规则给出）</td></tr>
+      {% if chain.description %}<tr><th>链路概述</th><td>{{ chain.description }}</td></tr>{% endif %}
+    </tbody>
+  </table>
+
+  {% if chain.narrative %}
+  <h3>攻击链叙事 {% if chain.narrative_degraded %}<span class="badge badge-template">模板生成</span>{% endif %}</h3>
+  <p>{{ chain.narrative }}</p>
+  {% endif %}
+
+  <h3>逐环推演</h3>
+  {% for node in chain.nodes %}
+  <div class="chain-node {% if not node.is_verified %}inferred{% endif %}">
+    <div class="node-head">
+      第 {{ node.order_index + 1 }} 环
+      <span class="badge {{ 'badge-verified' if node.is_verified else 'badge-inferred' }}">{{ "已验证环" if node.is_verified else "已推演环" }}</span>
+      {{ node.label }}
+      <small style="color:#6b7280;font-weight:400">（{{ node.node_type }}{% if node.rule_id %} · 规则 {{ node.rule_id }}{% endif %}{% if node.vuln_code %} · {{ node.vuln_code }}{% endif %}）</small>
+    </div>
+    {% if node.detail %}<div>{{ node.detail }}</div>{% endif %}
+    {% if node.precondition %}<div><small style="color:#6b7280">前置条件：</small>{{ node.precondition }}</div>{% endif %}
+    {% if node.postcondition %}<div><small style="color:#6b7280">取得结果：</small>{{ node.postcondition }}</div>{% endif %}
+  </div>
+  {% endfor %}
+
+  {% if chain.verification_footnote %}
+  <p style="color:#6b7280;font-size:12.5px">脚注：{{ chain.verification_footnote }}</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% endif %}

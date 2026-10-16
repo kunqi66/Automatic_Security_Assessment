@@ -1,0 +1,21 @@
+{#- 第 3 章 漏洞清单（B6 设计 §4.4 第 3 行）。
+
+     无 verified 漏洞时**改列 unverified/potential 并显著标注「未通过动态验证」**
+     （设计 §4.4 与 §6 出错处理表的同一口径）。这一条不是排版细节，
+     是报告伦理：一份「看起来全是已确认漏洞」的报告会让读者高估证据强度。 -#}
+<h2>3. {{ d.chapter3_title }}</h2>
+
+{% if d.chapter3_note %}
+<div class="notice {% if not d.has_verified %}warn{% endif %}">
+  <span class="title">{{ "证据强度说明" if d.has_verified else "本次无通过动态验证的漏洞" }}</span>
+  {{ d.chapter3_note }}
+</div>
+{% endif %}
+
+{% if d.vulnerabilities %}
+{% for v in d.vulnerabilities %}
+{% include "partials/vuln_card.j2" %}
+{% endfor %}
+{% else %}
+<p>本次评估未产出漏洞条目。</p>
+{% endif %}

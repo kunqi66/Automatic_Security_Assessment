@@ -1,0 +1,89 @@
+# 控制面 API（systemd unit）
+#
+# ## 为什么不用 Docker 跑自己的后端
+#
+# 这台机器上 MySQL / Redis / Milvus 已经在 Docker 里了，再把自己的 API 塞进去，
+# 就要处理「容器怎么连宿主机的 MySQL」—— 三种解法（host 网络 / host-gateway /
+# 走公网）各自都有一串能出错的细节。而 systemd 直接跑，`127.0.0.1:3306`
+# 就是 `127.0.0.1:3306`，没有中间层。
+#
+# 更重要的是**沙箱**：worker 要通过 Docker SDK 创建探针容器。跑在宿主机上时
+# 它连的是本地 unix socket，挂载路径就是真实路径；跑在容器里就得把
+# `/var/run/docker.sock` 挂进去，于是「容器里的路径」与「宿主机的路径」
+# 分裂成两套，而绑定挂载只认后者 —— 这类 bug 表现为「容器起来了但目录是空的」。
+#
+# ## 为什么不装到 /usr/local
+#
+# 全部落在 `/srv/asa/app`。卸载 = 停服务 + 删一个目录，
+# 不需要去系统各个角落找散落的文件。
+
+[Unit]
+Description=自动化安全评估系统 - API（控制面）
+Documentation=file:/srv/asa/app/README.md
+After=network-online.target mysql.service
+Wants=network-online.target
+# 只要求 MySQL 先起来；Redis 连不上时 API 仍然可用（读接口不依赖它，
+# 只有 SSE 与创建评估需要）。用 Requires 会让 Redis 重启把 API 一起拖下去。
+
+[Service]
+Type=exec
+User=asa
+Group=asa
+# 补充分组：docker 组给了访问 daemon 的权限。**不加这个的话**
+# worker 会在启动时直接 `PermissionError`，而不是「沙箱不可用」——
+# 那是配置错误，不该被降级逻辑掩盖。
+SupplementaryGroups=docker
+
+WorkingDirectory=/srv/asa/app/backend
+EnvironmentFile=/srv/asa/app/backend/.env
+Environment=PYTHONUNBUFFERED=1
+# Windows 上开发时设过 PYTHONIOENCODING=gbk，这个变量**不能**带到 Linux
+# （会被解释成未知编码而告警刷屏）。这里显式清掉。
+Environment=PYTHONIOENCODING=utf-8
+
+# `--no-sync`：不在启动时同步依赖。启动时同步意味着一次网络抖动会让
+# 服务起不来，而且「代码更新了但依赖没更新」这个失败会被推迟到运行期。
+# 依赖由 `provision_app.sh` 显式同步，失败就在部署阶段失败。
+ExecStart=/usr/local/bin/uv run --no-sync uvicorn app.main:app \
+    --host 127.0.0.1 --port 8010 --no-access-log --proxy-headers
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=always
+RestartSec=3
+# 疯狂重启会把日志刷满、把 CPU 吃光。60 秒内超过 5 次就停下等人看。
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+# --- 资源上限 ---
+# 这台机器 2 vCPU / 7.3G，上面还跑着 Milvus 与 MySQL。
+# 不设上限的话，一次异常的内存增长会由内核随机挑一个进程 OOM kill ——
+# 大概率挑中 Milvus 或 MySQL，也就是「我们的 bug 让别人掉线」。
+MemoryMax=2G
+MemoryHigh=1500M
+CPUQuota=100%
+# 大量文件 IO 的是分析引擎，不是 API。压低它的 IO 权重，
+# 让 MySQL 的刷盘不至于排在我们后面。
+IOWeight=50
+
+# --- 安全加固 ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+# `/srv/asa` 要可写：上传的源码归档、解压出的工作区、生成的报告都在这里。
+ReadWritePaths=/srv/asa
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+# ⚠️ **不能**开 `RestrictNamespaces` / `PrivateDevices` 之类的强限制：
+# 本进程要调 Docker API，而 Docker 的行为不受这些开关约束，
+# 开了只会得到一个更难懂的失败。
+# `NoNewPrivileges` + `ProtectSystem=strict` 是这里能拿到的主要收益。
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=asa-api
+
+[Install]
+WantedBy=multi-user.target

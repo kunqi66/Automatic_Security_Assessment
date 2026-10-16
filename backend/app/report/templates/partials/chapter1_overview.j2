@@ -1,0 +1,78 @@
+{#- 第 1 章 项目概况与执行信息（B6 设计 §4.4 第 1 行）。
+    **不可降级**：`projects` / `assessments` 取不到就是 L5，报告根本不会生成到这里。
+    `skipped` 的阶段如实写成「已跳过」而不是「已完成」——「没跑」与「跑了没问题」
+    是完全不同的两件事，报告不能把它们混成同一个灰点。 -#}
+<h2>1. 项目概况与执行信息</h2>
+
+<table>
+  <tbody>
+    <tr><th style="width:150px">项目名称</th><td>{{ d.meta.project_name }}</td></tr>
+    {% if d.meta.project_description %}
+    <tr><th>项目描述</th><td>{{ d.meta.project_description }}</td></tr>
+    {% endif %}
+    <tr><th>代码来源</th>
+      <td>
+        {%- if d.meta.source_type == "git" -%}
+          Git 仓库 {{ d.meta.source_url or "（地址未记录）" }}
+          {%- if d.meta.source_branch %}（分支 {{ d.meta.source_branch }}）{% endif %}
+        {%- else -%}
+          源码包上传
+        {%- endif -%}
+      </td>
+    </tr>
+    <tr><th>技术栈</th>
+      <td>
+        {%- if d.meta.tech_stack -%}
+          {% for key, value in d.meta.tech_stack.items() %}<code>{{ key }} {{ value }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+        {%- else -%}
+          <span style="color:#6b7280">未识别（recon 阶段未产出技术栈信息）</span>
+        {%- endif -%}
+      </td>
+    </tr>
+    <tr><th>扫描代码行数</th>
+      <td>
+        {%- if d.meta.total_loc > 0 -%}
+          {{ d.meta.total_loc }} 行（非空行口径）
+        {%- else -%}
+          <span style="color:#6b7280">未记录</span>
+        {%- endif -%}
+      </td>
+    </tr>
+    <tr><th>评估起止时间</th>
+      <td>
+        {%- if d.meta.started_at %}{{ d.meta.started_at.strftime('%Y-%m-%d %H:%M:%S') }}{% else %}未开始{% endif %}
+        {%- if d.meta.finished_at %} → {{ d.meta.finished_at.strftime('%Y-%m-%d %H:%M:%S') }}{% endif %}
+        {%- if d.meta.duration_seconds is not none %}（耗时 {{ "%.1f"|format(d.meta.duration_seconds) }} 秒）{% endif %}
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>流水线执行摘要</h3>
+<table>
+  <thead>
+    <tr>
+      <th style="width:110px">阶段</th>
+      <th style="width:90px">状态</th>
+      <th style="width:110px">耗时</th>
+      <th>说明</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for stage in d.meta.stages %}
+    <tr>
+      <td><code>{{ stage.stage }}</code></td>
+      <td>
+        {%- if stage.status == "completed" -%}<span class="badge badge-low">已完成</span>
+        {%- elif stage.status == "failed" -%}<span class="badge badge-critical">失败</span>
+        {%- elif stage.status == "skipped" -%}<span class="badge badge-unverified">已跳过</span>
+        {%- elif stage.status == "running" -%}<span class="badge badge-verified">进行中</span>
+        {%- else -%}<span class="badge badge-unverified">未开始</span>
+        {%- endif -%}
+      </td>
+      <td>{% if stage.duration_seconds is not none %}{{ "%.1f"|format(stage.duration_seconds) }} 秒{% else %}—{% endif %}</td>
+      <td>{{ stage.note or "" }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>

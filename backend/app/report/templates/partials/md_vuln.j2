@@ -1,0 +1,99 @@
+{#- 单条漏洞（Markdown 版）。与 `vuln_card.j2` 同字段、同顺序，只换语法。 -#}
+### {{ v.code }} — {{ v.title | md_cell }}
+
+**{{ v.severity_cn }}** · {{ v.status_cn }}{% if v.guard_blocked %} · 存在净化/闸门记录{% endif %}
+
+| 项 | 值 |
+|---|---|
+| 漏洞类型 | {{ v.type_label | md_cell }}（`{{ v.vuln_type }}`） |
+| CVSS | {{ "%.1f"|format(v.cvss_score) }}{% if v.cvss_vector %} `{{ v.cvss_vector }}`{% endif %}{% if v.cvss_estimated %}（该值由漏洞严重度中位值代入，原始记录缺失 CVSS —— 评分不完整）{% endif %} |
+| 触发位置 | `{{ v.file_path }}:{{ v.line_start }}-{{ v.line_end }}`{% if v.sink_symbol %} · 下沉符号 `{{ v.sink_symbol }}`{% endif %} |
+| 检测方式 | `{{ v.detection_method }}` · 置信度 {{ "%.2f"|format(v.confidence) }}（由确定性规则给出，非概率） |
+| 验证状态 | {{ v.status_cn }} |
+{% if v.data_incomplete -%}
+| 数据完整性 | 本条存在字段缺失（如无 CVSS、无污点路径或无探针记录），以下为已记录的部分 |
+{% endif %}
+{% if v.description %}
+**漏洞描述**
+
+{{ v.description | md_text }}
+{% endif %}
+{% if v.taint_path %}
+**污点路径**
+
+| # | 环节 | 位置 | 符号 | 源码片段 |
+|---:|---|---|---|---|
+{% for step in v.taint_path -%}
+| {{ step.step_index + 1 }} | {{ step.step_type }} | `{{ step.file_path }}:{{ step.line }}` | {{ ("`" ~ step.symbol ~ "`") if step.symbol else "—" }} | {{ (step.code_snippet or "—") | md_cell }} |
+{% endfor %}
+{% else %}
+未记录到污点路径（本条为模式匹配命中，报告中不给出未经证实的数据流描述）。
+{% endif %}
+{% if v.poc %}
+**动态验证证据**
+
+- 手法：{{ v.poc.technique or "未记录" }}
+- 载荷匹配：{{ "命中" if v.poc.matched else "未命中" }}
+{% if v.poc.http_status is not none %}- HTTP：{{ v.poc.http_status }}
+{% endif %}
+{% if v.poc.elapsed_ms is not none %}- 耗时：{{ v.poc.elapsed_ms }} ms
+{% endif %}
+
+{% if v.poc.bound_to_finding %}
+> **证据强度：逐点确认。** 探针由本条的污点路径**反查出了自己的端点**
+> （路由、参数名、注入位置均取自源码，见 `backend/app/verify/routes.py`），
+> 因此下方请求报文打的就是本条的触发位置。
+{% else %}
+> **证据强度：仅类别级。** 探针打在该类漏洞的**标准形态路由**上（路由由探针模板
+> 给定，不由本条目决定）—— 本条**未能从源码反查出自己的端点**。因此上述命中读作
+> **「该类漏洞的标准形态已在本目标上确认」**，而**不等于**「本行所在的端点已被打通」。
+> **请自行比对请求报文路径与本条触发位置：二者不同则不是同一件事。**
+{% endif %}
+
+载荷：
+
+{{ md_code(v.poc.payload) }}
+{% if v.poc.expected_pattern %}
+判定依据（nonce 匹配）：`{{ v.poc.expected_pattern }}`
+{% endif %}
+{% if v.poc.request_raw %}
+请求报文：
+
+{{ md_code(v.poc.request_raw, "http") }}
+{% endif %}
+{% if v.poc.response_raw %}
+响应报文（截断）：
+
+{{ md_code(v.poc.response_raw, "http") }}
+{% endif %}
+{% else %}
+**动态验证证据**
+
+{% if v.guard_blocked -%}
+本次针对本条的探针尝试**全部被无害化闸门拦下**。被拦下证明的是「这次尝试被拦住了」，
+不能作为「这里能打」的证据，因此不在此处展示；它同样**不等于**「这里打不了」。
+本条的验证状态仍为「{{ v.status_cn }}」，请以静态分析结论为准并另行补充验证。
+{% elif v.status == "rejected" -%}
+本条的**机器动态验证未复现**：无害化探针执行了，但没有取得证据。
+这**不等于**误报已经确认 —— 探针打在模板固定的路由上，若本条的注入点不在此路由，
+「打不到」与「打不穿」在探针结果里长得一模一样。**该结论未经人工确认，处置前请人工复核。**
+{% else -%}
+本条**没有可展示的探针记录**：未生成有效探针，或 `poc_verify` 阶段被跳过。
+以下结论全部来自静态分析 —— 它说明「数据流未经过有效净化」已被确认，
+但「能否被真正利用」尚未验证。
+{% endif %}
+{% endif %}
+{% if v.patch %}
+**修复补丁**（草案，须人工复核后手动应用）
+
+- 目标文件：`{{ v.patch.target_file }}`
+- 产出源：{% if v.patch.source == "llm" %}大语言模型生成{% if v.patch.llm_model %}（`{{ v.patch.llm_model }}`）{% endif %}{% elif v.patch.source == "template" %}确定性模板生成{% else %}四道校验未通过，已降级为人工参考{% endif %}
+- 处置状态：{{ v.patch.status }}
+- 四道校验：① 合法 unified diff {{ "通过" if v.patch.valid_diff else "未通过" }} ／ ② ±20 行窗口 {{ "通过" if v.patch.window_ok else "未通过" }} ／ ③ `git apply` 干跑 {{ "通过" if v.patch.apply_check_ok else "未通过" }} ／ ④ 污点路径消失 {{ "通过" if v.patch.taint_cleared else "未通过" }}
+{% if v.patch.failure_reason %}- 未通过原因：{{ v.patch.failure_reason | md_cell }}
+{% endif %}
+{% if v.patch.rationale %}- 补充说明：{{ v.patch.rationale | md_cell }}
+{% endif %}
+
+{{ md_code(v.patch.diff, "diff") }}
+{% endif %}

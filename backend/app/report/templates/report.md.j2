@@ -1,0 +1,147 @@
+{#- B6 报告 Markdown 主模板。
+
+     与 `report.html.j2` **同章节顺序、同字段**（设计 §7.2「一套数据三格式」），
+     只替换呈现语法：表格替代卡片、文字前缀替代配色。
+     ⚠️ 图表在 Markdown 里**降级为表格**（设计 §7.3 表格行）：base64 内联 PNG
+     会让纯文本 diff 变得不可读，而 Markdown 的核心价值正是「可 diff、可粘贴」。
+
+     转义策略（见 render.py）：表格单元格走 `md_cell`，正文走 `md_text`，
+     代码与补丁走 `md_code`。`autoescape=False` 是有意的 ——
+     Markdown 是纯文本格式，HTML 实体转义会污染正文（`&lt;` 会原样出现在报告里）。 -#}
+# {{ d.meta.project_name | md_text }} — 安全评估报告
+
+- 评估编号：#{{ d.meta.assessment_id }}
+- 生成时间：{{ d.meta.generated_at.strftime('%Y-%m-%d %H:%M:%S') }}
+- 项目综合等级：**{{ d.score.grade_cn }}**（安全评分 {{ "%.2f"|format(d.score.score) }} / 100）
+- 漏洞总数：{{ d.vulnerabilities | length }} 条 · 攻击链 {{ d.chains | length }} 条
+
+{% if d.degraded %}
+> **本次报告的降级说明：** {% for item in d.degraded %}`{{ item }}`{% if not loop.last %} {% endif %}{% endfor %}
+> 降级只影响呈现方式，不影响漏洞清单、评分与排序等任何结论。
+{% endif %}
+
+## 1. 项目概况与执行信息
+
+| 项 | 值 |
+|---|---|
+| 项目名称 | {{ d.meta.project_name | md_cell }} |
+| 项目描述 | {{ (d.meta.project_description or "—") | md_cell }} |
+| 代码来源 | {{ (("Git 仓库 " ~ d.meta.source_url ~ ("（分支 " ~ d.meta.source_branch ~ "）" if d.meta.source_branch else "")) if d.meta.source_type == "git" else "源码包上传") | md_cell }} |
+| 技术栈 | {% if d.meta.tech_stack %}{% for k, val in d.meta.tech_stack.items() %}{{ k | md_cell }} {{ val | md_cell }}{% if not loop.last %}、{% endif %}{% endfor %}{% else %}未识别{% endif %} |
+| 扫描代码行数 | {{ (d.meta.total_loc ~ " 行（非空行口径）") if d.meta.total_loc else "未记录" }} |
+| 评估起始 | {{ d.meta.started_at.strftime('%Y-%m-%d %H:%M:%S') if d.meta.started_at else "未开始" }} |
+| 评估结束 | {{ d.meta.finished_at.strftime('%Y-%m-%d %H:%M:%S') if d.meta.finished_at else "未结束" }} |
+| 总耗时 | {{ ("%.1f 秒"|format(d.meta.duration_seconds)) if d.meta.duration_seconds is not none else "—" }} |
+
+### 流水线执行摘要
+
+| 阶段 | 状态 | 耗时（秒） | 说明 |
+|---|---|---|---|
+{% for stage in d.meta.stages -%}
+| `{{ stage.stage }}` | {{ {"completed": "已完成", "failed": "失败", "skipped": "已跳过（降级，非失败）", "running": "进行中", "pending": "未开始"}[stage.status] }} | {{ ("%.1f"|format(stage.duration_seconds)) if stage.duration_seconds is not none else "—" }} | {{ (stage.note or "") | md_cell }} |
+{% endfor %}
+
+## 2. 安全评分与风险大盘
+
+{% if d.empty_state %}
+> **未发现漏洞。** 本次评估未产出任何漏洞条目。请注意这**不等于**「系统不存在漏洞」——
+> 它表示当前规则集与污点分析范围（Python 源码）内没有命中，
+> 未覆盖的语言、依赖库漏洞与业务逻辑缺陷不在本次结论范围内。
+{% endif %}
+
+- **项目综合等级**：{{ d.score.grade_cn }}（`{{ d.score.grade }}`）
+- **安全评分**：{{ "%.2f"|format(d.score.score) }} / 100（越高越安全）
+- **评分口径**：综合评分 = max(0, 100 − Σ CVSS × 状态折算)；状态折算：已通过验证 ×1.0、存在线索 ×0.4、未经验证 ×0.1
+- **等级口径**：自上而下首个命中 —— 存在已验证的严重漏洞（一票否决）→ 极高危；评分 < 40 → 极高危；评分 < 70 或存在已验证的高危 → 高危；评分 < 90 → 中危；其余 → 安全
+
+{% if d.score.veto %}
+> **一票否决已触发**：存在**已通过动态验证的严重级漏洞**，项目综合等级直接判定为「极高危」，
+> 不因评分较高而稀释。评分（{{ "%.2f"|format(d.score.score) }}）仅作趋势指标，不作为本次结论。
+{% endif %}
+
+{% if d.score.incomplete %}
+> **评分不完整**：部分漏洞缺少 CVSS 评分，已按漏洞严重度的中位值代入
+> （严重 9.5 / 高危 8.0 / 中危 5.5 / 低危 2.5）。该代入值仅供汇总，不替代逐条漏洞的评分记录。
+{% endif %}
+
+### 严重度 × 验证状态分布
+
+| 漏洞严重度 | 已通过验证 | 存在线索 | 未经验证 | 动态未复现 | 合计 |
+|---|---:|---:|---:|---:|---:|
+{% for sev in ["critical", "high", "medium", "low"] -%}
+| {{ SEVERITY_LABEL[sev] }} | {{ d.severity_matrix.get((sev, "verified"), 0) }} | {{ d.severity_matrix.get((sev, "potential"), 0) }} | {{ d.severity_matrix.get((sev, "unverified"), 0) }} | {{ d.severity_matrix.get((sev, "rejected"), 0) }} | **{{ d.severity_row_totals[sev] }}** |
+{% endfor %}
+
+{% if d.type_distribution %}
+### 漏洞类型占比（图表在 Markdown 中降级为表格）
+
+| 类型 | 数量 | 占比 |
+|---|---:|---:|
+{% for item in d.type_distribution -%}
+| {{ item.label | md_cell }} | {{ item.count }} | {{ "%.1f"|format(item.ratio * 100) }}% |
+{% endfor %}
+{% endif %}
+
+## 3. {{ d.chapter3_title }}
+
+{% if d.chapter3_note %}
+> {% if d.has_verified %}**证据强度说明：**{% else %}**本次无通过动态验证的漏洞：**{% endif %}
+> {{ d.chapter3_note | md_text }}
+{% endif %}
+
+{% if d.vulnerabilities %}
+{% for v in d.vulnerabilities %}
+{% include "partials/md_vuln.j2" %}
+{% endfor %}
+{% else %}
+本次评估未产出漏洞条目。
+{% endif %}
+
+## 4. 多步攻击路径推演
+
+{% if d.chapter4_placeholder %}
+> **本次未产出攻击链：** {{ d.chapter4_placeholder | md_text }}
+{% else %}
+> **图例：** **已验证环** —— 已在沙箱中无害验证；**已推演环** —— 由已证实的前置条件推演得出，未实际执行。
+> 本系统可以推断「这里能打穿」，但不代为打穿。
+
+{% for chain in d.chains %}
+{% include "partials/md_chain.j2" %}
+{% endfor %}
+{% endif %}
+
+## 5. 安全整改建议
+
+{% if d.notes_template_count %}
+> **本次建议文案由确定性模板生成：** {{ d.notes_template_count }}/{{ d.recommendations | length }} 条
+> 整改建议的文案未由大语言模型生成（模型不可用或输出未通过实体白名单校验），
+> 已降级为类型模板文案并标注「模板生成」。**整改项的排序与其结构化字段不受影响** —— 它们本就不来自模型。
+{% endif %}
+
+排序口径：优先级 = 漏洞等级权重 × 可达性 × 1/修复成本（并列时按漏洞编号升序）。该公式为纯函数，同一份数据重复生成得到完全相同的顺序。
+
+{% if d.recommendations %}
+| # | 漏洞编号 | 等级 | 优先级 | 位置 |
+|---:|---|---|---:|---|
+{% for r in d.recommendations -%}
+| {{ r.rank }} | `{{ r.code }}` | {{ r.severity_cn }} | {{ "%.3f"|format(r.priority) }} | `{{ r.file_path }}:{{ r.line_start }}-{{ r.line_end }}` |
+{% endfor %}
+
+{% for r in d.recommendations %}
+{% include "partials/md_recommendation.j2" %}
+{% endfor %}
+{% else %}
+本次评估没有需要整改的条目。
+{% endif %}
+
+{% if d.excluded_rejected %}
+另有 {{ d.excluded_rejected }} 条漏洞经机器动态验证未复现，列入第 3 章留痕但不出现在本清单中。
+该结论**未经人工确认**，仅表示本次无害化探针未取得证据；请人工复核后再决定是否忽略。
+{% endif %}
+
+---
+
+本报告由「自动化安全评估系统」基于数据库快照自动生成，可复现：同一份数据重复生成得到完全相同的结论与排序。
+报告中的漏洞位置、严重度、CVSS、验证状态与攻击链结构均由确定性规则与沙箱验证产出，**不来自大语言模型**；
+模型仅参与自然语言措辞，其输出经实体白名单校验，未通过即降级为模板文案并标注「模板生成」。
+本系统不对目标系统实施破坏性利用，攻击链的末端环节以推演标注。

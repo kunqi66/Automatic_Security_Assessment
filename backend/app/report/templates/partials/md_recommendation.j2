@@ -1,0 +1,15 @@
+{#- 单个整改项（Markdown 版）。 `priority_factors` 逐项列出，排序可当场复算。 -#}
+#### 整改项 {{ r.rank }}：`{{ r.code }}` — {{ r.title | md_cell }}
+
+**{{ r.severity_cn }}** · {{ r.status_cn }}{% if r.note_degraded %} · 文案由确定性模板生成{% endif %}
+
+- 漏洞类型：{{ r.type_label | md_cell }}
+- CVSS：{{ "%.1f"|format(r.cvss_score) }}
+- 位置：`{{ r.file_path }}:{{ r.line_start }}-{{ r.line_end }}`
+- 优先级因子：等级权重 {{ r.priority_factors.get("等级权重", 0) }} × 可达性 {{ r.priority_factors.get("可达性", 0) }} × 1/修复成本({{ r.priority_factors.get("修复成本", 0) }}) = **{{ "%.3f"|format(r.priority) }}**
+- 文案来源：{{ "确定性模板" if r.note_degraded else "大语言模型 " ~ r.note_model }}
+
+{{ r.note | md_text }}
+{% if r.patch %}
+> 关联补丁：`{{ r.patch.target_file }}`{% if r.patch.all_gates_passed %}，四道校验全部通过（污点路径已确认消失）{% else %}，**四道校验未全部通过，仅作人工参考，不要直接应用**{% endif %}。补丁正文见第 3 章对应条目。
+{% endif %}

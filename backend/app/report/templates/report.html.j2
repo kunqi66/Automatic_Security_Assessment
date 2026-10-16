@@ -1,0 +1,61 @@
+{#- B6 报告 HTML 主模板（B6 设计 §4.4 五章）。
+
+    设计约定（§4.1 两条不可违背）：
+    ① 数据只来自由 `render_html(data)` 传入的唯一 `ReportData`，模板**不查库**；
+    ② 模板**只做呈现**，任何聚合/排序/比值都已在 scoring/assembler 里算完。
+    本文件里没有一次算术（除了 `100 - score` 这种纯展示口径），这是刻意的。
+
+    安全：本文件渲染的字段里包含**被评估项目的源码片段**与 **LLM 输出**，
+    两者都是不可信数据。渲染环境开了 autoescape=True（见 render.py），
+    所以 `{{ ... }}` 一律转义；唯一原样输出的是 `inline_css` 与图表函数返回的
+    Markup，而那两个来源自己负责转义（见 charts.py 的 `_text`）。 -#}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+{# CSP：报告会被整段塞进前端 iframe 预览。正文里含外部项目的源码与模型文本，
+   即便将来有人在模板里漏了一处转义，这条也保证没有脚本能执行、
+   没有连接能发出（default-src 'none'）。style/img 走内联与 data: 是因为
+   报告是零外部资源的（设计 §3.1）。 #}
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="自动化安全评估系统 · B6 报告汇编">
+<title>{{ d.meta.project_name }} — 安全评估报告</title>
+{{ inline_css }}
+</head>
+<body>
+
+<header class="report-header">
+  <h1>{{ d.meta.project_name }} — 安全评估报告</h1>
+  <div class="meta">
+    <span>评估编号：#{{ d.meta.assessment_id }}</span>
+    <span>生成时间：{{ d.meta.generated_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+    <span>报告版本：v1</span>
+  </div>
+</header>
+
+{% if d.degraded %}
+<div class="degraded-banner">
+  <strong>本次报告的降级说明：</strong>
+  {%- for item in d.degraded %}<code>{{ item }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+  —— 降级只影响呈现方式，不影响漏洞清单、评分与排序等任何结论。
+</div>
+{% endif %}
+
+{% include "partials/chapter1_overview.j2" %}
+{% include "partials/chapter2_score.j2" %}
+{% include "partials/chapter3_vulns.j2" %}
+{% include "partials/chapter4_chains.j2" %}
+{% include "partials/chapter5_recommendations.j2" %}
+
+<footer>
+  本报告由「自动化安全评估系统」基于数据库快照自动生成，可复现：同一份数据重复生成
+  得到完全相同的结论与排序。报告中的漏洞位置、严重度、CVSS、验证状态与攻击链结构
+  均由确定性规则与沙箱验证产出，<strong>不来自大语言模型</strong>；模型仅参与自然语言措辞，
+  其输出经实体白名单校验，未通过即降级为模板文案并在正文中标注「模板生成」。
+  本系统不对目标系统实施破坏性利用，攻击链的末端环节以推演标注。
+</footer>
+
+</body>
+</html>

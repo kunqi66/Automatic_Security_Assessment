@@ -1,0 +1,57 @@
+{#- 第 5 章 安全整改建议（B6 设计 §4.4 第 5 行）。
+
+     **顺序由 `scoring.py` 的确定性公式产出**（等级 × 可达性 × 修复成本），
+     模板只是按 `rank` 逐个渲染 —— 模板里没有任何排序逻辑，这是 L1 的可视证据：
+     想让 LLM 影响排序，得先改 `scoring.py`，而不是在模板里加个 `sort`。 -#}
+<h2>5. 安全整改建议</h2>
+
+{% if d.notes_template_count %}
+<div class="notice warn">
+  <span class="title">本次建议文案由确定性模板生成</span>
+  {{ d.notes_template_count }}/{{ d.recommendations | length }} 条整改建议的文案未由大语言模型生成
+  （模型不可用或输出未通过实体白名单校验），已降级为类型模板文案并在此标注「模板生成」。
+  <strong>整改项的排序与其结构化字段不受影响</strong> —— 它们本就不来自模型。
+</div>
+{% endif %}
+
+{% if d.recommendations %}
+<p>
+  排序口径：优先级 = 漏洞等级权重 × 可达性 × 1/修复成本（并列时按漏洞编号升序）。
+  该公式为纯函数，同一份数据重复生成得到完全相同的顺序。
+</p>
+<table>
+  <thead>
+    <tr>
+      <th style="width:44px" class="num">#</th>
+      <th style="width:120px">漏洞编号</th>
+      <th style="width:110px">等级</th>
+      <th style="width:90px" class="num">优先级</th>
+      <th>位置</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in d.recommendations %}
+    <tr>
+      <td class="num">{{ r.rank }}</td>
+      <td><code>{{ r.code }}</code></td>
+      <td><span class="badge badge-{{ r.severity }}">{{ r.severity_cn }}</span></td>
+      <td class="num">{{ "%.3f"|format(r.priority) }}</td>
+      <td><code>{{ r.file_path }}:{{ r.line_start }}-{{ r.line_end }}</code></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{% for r in d.recommendations %}
+{% include "partials/recommendation_card.j2" %}
+{% endfor %}
+{% else %}
+<p>本次评估没有需要整改的条目。</p>
+{% endif %}
+
+{% if d.excluded_rejected %}
+<p style="color:#6b7280;font-size:12.5px">
+  另有 {{ d.excluded_rejected }} 条漏洞经机器动态验证未复现，列入第 3 章留痕但不出现在本清单中。
+  该结论<strong>未经人工确认</strong>，仅表示本次无害化探针未取得证据；请人工复核后再决定是否忽略。
+</p>
+{% endif %}

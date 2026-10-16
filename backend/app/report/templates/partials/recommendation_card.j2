@@ -1,0 +1,44 @@
+{#- 单个整改项。`priority_factors` 逐项列出，让「为什么它排在前面」当场可复算 ——
+     排序是报告的结论之一，不可解释的排序等于黑盒。 -#}
+<div class="card">
+  <header>
+    <h3>
+      整改项 {{ r.rank }}：<code>{{ r.code }}</code> {{ r.title }}
+      <span class="badge badge-{{ r.severity }}">{{ r.severity_cn }}</span>
+      <span class="badge badge-{{ 'verified' if r.status == 'verified' else 'unverified' }}">{{ r.status_cn }}</span>
+      {% if r.note_degraded %}<span class="badge badge-template">模板生成</span>{% endif %}
+    </h3>
+  </header>
+
+  <table>
+    <tbody>
+      <tr><th style="width:130px">漏洞类型</th><td>{{ r.type_label }}</td></tr>
+      <tr><th>CVSS</th><td>{{ "%.1f"|format(r.cvss_score) }}</td></tr>
+      <tr><th>位置</th><td><code>{{ r.file_path }}:{{ r.line_start }}-{{ r.line_end }}</code></td></tr>
+      <tr>
+        <th>优先级因子</th>
+        <td>
+          等级权重 {{ r.priority_factors.get("等级权重", 0) }}
+          × 可达性 {{ r.priority_factors.get("可达性", 0) }}
+          × 1/修复成本({{ r.priority_factors.get("修复成本", 0) }})
+          = <strong>{{ "%.3f"|format(r.priority) }}</strong>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>建议文案 <small style="color:#6b7280;font-weight:400">（来源：{{ "确定性模板" if r.note_degraded else "大语言模型 " ~ r.note_model }}）</small></h3>
+  <p>{{ r.note }}</p>
+
+  {% if r.patch %}
+  <p style="font-size:12.5px;color:#6b7280">
+    关联补丁：<code>{{ r.patch.target_file }}</code>
+    {%- if r.patch.all_gates_passed %}
+      ，四道校验全部通过（污点路径已确认消失）
+    {%- else %}
+      ，<strong style="color:#b45309">四道校验未全部通过，仅作人工参考，不要直接应用</strong>
+    {%- endif %}
+    。补丁正文见第 3 章对应条目。
+  </p>
+  {% endif %}
+</div>

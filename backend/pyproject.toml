@@ -1,0 +1,79 @@
+[project]
+name = "automatic-security-assessment"
+version = "0.1.0"
+description = "自动化安全评估系统 —— 后端（可控多智能体，LLM 只做表达不参与判定）"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "sse-starlette>=2.1",
+    # --- 数据层 ---
+    "sqlalchemy[asyncio]>=2.0.36",
+    "aiomysql>=0.2.0",
+    # MySQL 8 默认 caching_sha2_password，非 SSL 连接缺 cryptography 会直接认证失败
+    "cryptography>=43.0",
+    "alembic>=1.14",
+    "redis>=5.2",
+    # --- 配置与校验 ---
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pyjwt>=2.10",
+    "bcrypt>=4.2",
+    # --- 外部系统 ---
+    # `docker[ssh]`：SSH 传输层（数据面在 ECS 上，控制面在别处）。
+    # **必须显式带上 extra** —— `docker.transport.sshconn` 在模块顶部
+    # 无条件 `import paramiko`，即便用 `use_ssh_client=True` 的 shell-out
+    # 模式也一样。只写 `docker` 时本地导入能过（延迟导入），
+    # 一碰 `ssh://` 才炸，且抛的是 `ModuleNotFoundError` 而不是 `DockerException`。
+    "docker[ssh]>=7.1",
+    "httpx>=0.28",
+    "jinja2>=3.1",
+    "tree-sitter>=0.24",
+    "tree-sitter-python>=0.23",
+    "python-multipart>=0.0.20",
+    "aiofiles>=24.1",
+    "playwright>=1.49",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    # 仅用于「没有可用 MySQL 时生成方言无关的首版迁移」，见 config.database_url_override
+    "aiosqlite>=0.20",
+    # 靶场基准测试要读 `ranges/*/GROUND_TRUTH.yaml`（PRD §10.3 定的载体格式）。
+    # 放在 dev 而不是主依赖：运行期产品代码一行 YAML 都不读，
+    # 把它塞进主依赖等于给线上升级面白加一个包。
+    "pyyaml>=6.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "ASYNC", "S"]
+# S101: 测试与内部不变量用 assert 是刻意的
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+# 提示词模板里必然出现 f-string 拼接的长文本
+"app/llm/prompts/*.py" = ["E501"]
+# S310（urlopen 的 scheme 可疑）：`tools/` 是本地开发脚本，URL 是模块级常量
+# `BASE = f"http://127.0.0.1:{PORT}"`，端口是常量、主机是回环地址，
+# 没有任何一处 URL 来自外部输入 —— 这条告警在这里没有可命中的攻击面。
+# 只放 S310，不放 E501 之类：闸门放宽一项就要写清为什么，且只放这一项。
+"tools/*.py" = ["S310"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning"]

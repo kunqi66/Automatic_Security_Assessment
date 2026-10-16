@@ -1,0 +1,45 @@
+# ---- 密钥与本地配置（最高优先级，别往下挪）----
+.env
+.env.local
+*.env
+!.env.example
+*.pem
+*.key
+!**/public.key
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ---- Node ----
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+
+# ---- 控制面源码工作区（客户代码，绝不入库）----
+# 这里放的是被评估项目的源码副本与解包中间产物。
+# 一旦入库，等于把客户的私有代码提交到了本仓库的历史里 —— 那是删不掉的。
+.asa/
+workspaces/
+sources/
+
+# ---- 运行产物 ----
+*.log
+reports/*.pdf
+reports/*.docx
+.output/
+tmp/
+
+# ---- 编辑器 ----
+.vscode/
+.idea/
+*.swp
+.DS_Store

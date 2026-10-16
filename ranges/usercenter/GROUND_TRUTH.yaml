@@ -1,0 +1,179 @@
+# 靶场二：微服务用户中心 —— 漏洞基准（PRD §10.4）
+#
+# 这个靶场与靶场一的结构性差别，在 `app.py` 的模块 docstring 里写了：
+# 靶场一的缺陷是**写错了**（可以被模式匹配抓到），
+# 靶场二的缺陷是**漏写了**（只能被推断出来）。
+#
+# ## 这份基准里最重要的一件事：分母是 4，能检出的只有 2
+#
+# PRD §10.2 规定了 4 个漏洞（V5–V8）。本靶场如实实现并如实登记了这 4 条，
+# 但**其中 2 条当前系统检不出来**：
+#
+# | id | 静态可检出 | 动态可验证 |
+# |---|---|---|
+# | V5 IDOR | ✅ 有规则 | ✅ 有探针 |
+# | V6 未授权访问 | ❌ **既无规则也无 VulnType** | ⚠️ 有探针，但没有 finding 去驱动它 |
+# | V7 手机号明文 | ❌ 无规则 | ❌ 无探针 |
+# | V8 调试接口泄露 | ⚠️ 半条（检出的是硬编码密钥，不是"调试口开着"） | ✅ 有探针 |
+#
+# 把这两条**留着并登记**，而不是从靶场里删掉，是因为
+# 「召回率」只有在分母诚实的时候才是个有意义的数。删掉检不出的那两条，
+# 召回率立刻变成 2/2 = 100% —— 那个数字除了骗自己没有任何用处。
+
+range: usercenter
+prd_section: "PRD §10.2 靶场二：微服务用户中心"
+stack: "Flask 3.0 + SQLite（容器内 /tmp）"
+source_root: "."
+
+vulnerabilities:
+  # ------------------------------------------------------------------
+  # V5：平行越权（IDOR）
+  # ------------------------------------------------------------------
+  - id: usercenter-idor-profile
+    prd_id: V5
+    name: 用户资料接口缺失归属校验（平行越权）
+    category: idor
+    file: app.py
+    line_start: 88
+    line_end: 88
+    expected_payload_technique: [idor_horizontal]
+    expected_response_pattern: "{nonce}"
+    cvss: 6.5
+    cvss_vector: "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+    detectable: static
+    note: >
+      `line_start` 是参数化查询那一行（88），**不是**功能上"缺了的那一行" ——
+      缺的那一行不存在，没有行号。基准只能锚在缺陷的**载体**上，
+      这也是这类漏洞的置信度只有 0.55 的原因：证据是"函数体里找不到鉴权痕迹"，
+      是**缺席证明**，天然弱于靶场一那种"看得见的坏语句"。
+
+      写入侧在 `POST /api/user/profile`（118 行），刻意用了参数化查询 ——
+      这个端点的缺陷是**授权**不是注入，混进一个 SQL 注入会让
+      "这条 finding 对应 V5 还是 V5'"说不清，而基准的全部价值就是一一对应。
+
+  # ------------------------------------------------------------------
+  # V6：未授权访问 —— 曾是本靶场第一个诚实的能力边界，现已补上规则
+  # ------------------------------------------------------------------
+  - id: usercenter-unauth-user-list
+    prd_id: V6
+    name: 用户列表接口无鉴权
+    category: unauth_access
+    file: app.py
+    line_start: 156
+    line_end: 160
+    expected_payload_technique: [unauth_probe]
+    expected_response_pattern: "200+json"
+    cvss: 7.5
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+    detectable: static
+    note: >
+      **这一条曾经是"静态检不出、动态也验不了"，两边都已补上 —— 但原因不同。**
+
+      **静态**：`detect_unauth_access`（`app/analysis/patterns.py`）已实现，
+      `VulnType.UNAUTH_ACCESS` 也已入枚举，CVSS 按 `PR:N` 记（连账号都不用，
+      所以比 IDOR 的 `PR:L` 高：7.5 vs 6.5；影响仍是只读 `I:N`，
+      因为写侧的未授权修改被该规则显式排除，属另一个类别）。
+
+      **与 IDOR 的分界线是判据 4**：带 id 形参（或路由路径形参）的整表暴露
+      归 IDOR，不带的才是未授权访问。同一条路由只会被其中一条规则报。
+      所以本靶场 `GET /api/user/<user_id>/profile` 是 V5、
+      `GET /api/user/list` 是 V6，不会重复计。
+
+      **这条规则的方向是"宁可漏报"**：判据 5 靠表名匹配认"账号数据"，
+      认不出来就不报 —— "没认出来"只损失一条召回，而"认错了"会让规则在
+      每个项目上刷屏然后被关掉。同理只认**调用实参里**的 SQL 字符串，
+      docstring 里提到的 `SELECT`/`users` 不算（有单测钉住）。
+
+      **动态：探针现在真的跑了，但只算「仅类别级」。**
+      `unauth_probe` 模板一直都在（打 `/api/user/list`，判 `200+json`），
+      但 B5 只会为**已经存在的 finding** 建探针 —— 系统永远不会去验证它
+      从没发现的漏洞。"能发现"与"能验证"是两件事。
+
+      实测（`assessment #14`）：探针命中，`GET /api/user/list` → `matched=1
+      http=200`，但最终状态是 **`potential` 而不是 `verified`**。
+      原因不在探针，在**绑定**：`routes.bind_route` 要从污点路径反查出
+      "载荷该放进哪个参数"，而未鉴权端点**根本没有输入参数** ——
+      `list_users()` 不读 `request.*`，于是 `_param_and_inject` 返回 None，
+      绑定按设计拒绝（它宁可"不绑定"也不猜一个参数名）。
+      没绑定 ⇒ `bound_to_finding=False` ⇒ 命中只能算**这一类**在本目标上成立。
+      而模板的路由恰好就是 `/api/user/list`，所以它命中了 ——
+      换个路由名不同的目标，这条探针会打空。这条限制写在
+      `backend/docs/探针路由绑定.md` §10。
+
+      响应体刻意返回 5 个种子用户而非空列表：`match_status_code` 对 `+json`
+      的要求是"**非空**且可解析"，空列表证明不了任何事（可能列表本来就是空的）。
+
+  # ------------------------------------------------------------------
+  # V7：手机号明文
+  # ------------------------------------------------------------------
+  - id: usercenter-plaintext-phone
+    prd_id: V7
+    name: 用户手机号未脱敏返回
+    category: sensitive_data_exposure
+    file: app.py
+    line_start: 60
+    line_end: 60
+    expected_payload_technique: []
+    expected_response_pattern: "13800000002"
+    cvss: null
+    cvss_vector: null
+    detectable: none
+    note: >
+      **既无静态规则，也无探针模板** —— 而且这不是疏漏，是能力边界的必然：
+      "该脱敏没脱敏"既不是数据流问题（`phone` 从数据库流到响应体，中间没有任何
+      sink），也不是一次请求能证明的问题（系统怎么知道这个字段**应该**被打码？
+      那需要一份它拿不到的合规要求）。
+
+      它只有人工复核能发现。如实登记在这里，是为了让"V7 漏了"这个结论
+      出现在基准里，而不是消失在分母外。
+
+  # ------------------------------------------------------------------
+  # V8：调试接口泄露配置
+  # ------------------------------------------------------------------
+  - id: usercenter-hardcoded-secrets
+    prd_id: V8
+    name: 配置模块硬编码密钥
+    category: hardcoded_secret
+    file: settings.py
+    line_start: 14
+    line_end: 16
+    expected_payload_technique: [read_config]
+    expected_response_pattern: "(SECRET_KEY|DB_PASSWORD|DATABASE_URL|API_KEY|PASSWORD|TOKEN)\\s*[:=]"
+    cvss: 5.5
+    cvss_vector: "AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+    detectable: static
+    note: >
+      3 处：`DB_PASSWORD` / `JWT_SECRET` / `SMS_API_KEY`。
+      这是 V8 里**唯一**被静态检出的部分 —— 检出的是"密钥写死在源码里"，
+      不是"调试接口开着"。而这条 finding 之所以能把 V8 的泄露**验证**掉，
+      是因为 `hardcoded_secret` 在 `canonical_vuln_type` 里归一到
+      `info_disclosure`，从而驱动 `read_config` 探针去打 `/debug/config`。
+
+  - id: usercenter-debug-endpoint
+    prd_id: V8
+    name: 调试接口未关闭
+    category: info_disclosure
+    file: app.py
+    line_start: 175
+    line_end: 175
+    expected_payload_technique: [read_config]
+    expected_response_pattern: "(SECRET_KEY|DB_PASSWORD|DATABASE_URL|API_KEY|PASSWORD|TOKEN)\\s*[:=]"
+    cvss: 7.5
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+    detectable: none
+    note: >
+      路由本身**没有任何静态规则会报它** —— `@app.route("/debug/config")`
+      在语法上只是一个装饰器，看不出"这个接口不该对匿名开放"。
+      它的检出是**借道** `settings.py` 的硬编码密钥完成的（见上一条）：
+      静态给出线索，动态在真正的端点上确认。
+      `detectable` 记 `none` 而不是 `static`，因为严格说
+      没有任何规则指向 `app.py:175` 这一行。
+
+# ---------------------------------------------------------------------
+# PRD §10.2 的 4 条与上面条目的对应关系
+# ---------------------------------------------------------------------
+prd_mapping:
+  V5: [usercenter-idor-profile]
+  V6: [usercenter-unauth-user-list]
+  V7: [usercenter-plaintext-phone]
+  V8: [usercenter-hardcoded-secrets, usercenter-debug-endpoint]

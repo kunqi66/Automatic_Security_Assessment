@@ -1,0 +1,95 @@
+{#- 第 2 章 安全评分与风险大盘（B6 设计 §4.4 第 2 行）。
+
+     评分与等级**全部由 `scoring.py` 纯函数产出**，这一章里没有一处判断——
+     `score` / `grade` / `veto` / `incomplete` 都是数据。图表是静态内联 SVG（§7.3），
+     无漏洞时走空态、不画图。 -#}
+<h2>2. 安全评分与风险大盘</h2>
+
+{% if d.empty_state %}
+<div class="notice">
+  <span class="title">未发现漏洞</span>
+  本次评估未产出任何漏洞条目。请注意这并不等于「系统不存在漏洞」——
+  它表示当前规则集与污点分析范围（Python 源码）内没有命中，
+  未覆盖的语言、依赖库漏洞与业务逻辑缺陷不在本次结论范围内。
+</div>
+{% endif %}
+
+<div class="score-panel">
+  {{ score_ring(d.score.score, label=d.score.grade_cn) }}
+  <div class="facts">
+    <dl>
+      <dt>项目综合等级</dt>
+      <dd><span class="badge badge-{{ d.score.grade }}">{{ d.score.grade_cn }}</span></dd>
+      <dt>安全评分</dt>
+      <dd>{{ "%.2f"|format(d.score.score) }} / 100（越高越安全）</dd>
+      <dt>漏洞总数</dt>
+      <dd>{{ d.vulnerabilities | length }} 条</dd>
+      <dt>评分口径</dt>
+      <dd>
+        综合评分 = max(0, 100 − Σ CVSS × 状态折算)；状态折算：
+        已通过验证 ×1.0、存在线索 ×0.4、未经验证 ×0.1。
+      </dd>
+      <dt>项目综合等级口径</dt>
+      <dd>
+        自上而下首个命中：存在已验证的严重漏洞（一票否决）→ 极高危；评分 &lt; 40 → 极高危；
+        评分 &lt; 70 或存在已验证的高危 → 高危；评分 &lt; 90 → 中危；其余 → 安全。
+      </dd>
+    </dl>
+  </div>
+</div>
+
+{% if d.score.veto %}
+<div class="notice alert">
+  <span class="title">一票否决已触发</span>
+  本次评估存在<strong>已通过动态验证的严重级漏洞</strong>，项目综合等级直接判定为「极高危」，
+  不因评分较高而稀释。评分（{{ "%.2f"|format(d.score.score) }}）仍作为趋势指标保留，
+  仅用于横向比较，不作为本次结论。
+</div>
+{% endif %}
+
+{% if d.score.incomplete %}
+<div class="notice warn">
+  <span class="title">评分不完整</span>
+  部分漏洞缺少 CVSS 评分，已按漏洞严重度的中位值代入（严重 9.5 / 高危 8.0 / 中危 5.5 / 低危 2.5）。
+  该代入值仅供汇总，不替代逐条漏洞的评分记录。
+</div>
+{% endif %}
+
+<h3>严重度 × 验证状态分布</h3>
+{% if d.vulnerabilities %}
+<table>
+  <thead>
+    <tr>
+      <th style="width:110px">漏洞严重度</th>
+      <th class="num">已通过验证</th>
+      <th class="num">存在线索</th>
+      <th class="num">未经验证</th>
+      <th class="num">动态未复现</th>
+      <th class="num">合计</th>
+    </tr>
+  </thead>
+  <tbody>
+    {#- 逐格求和交给数据层：见 `ReportData.severity_row_totals` -#}
+    {% for sev in ["critical", "high", "medium", "low"] %}
+    <tr>
+      <td><span class="badge badge-{{ sev }}">{{ SEVERITY_LABEL[sev] }}</span></td>
+      <td class="num">{{ d.severity_matrix.get((sev, "verified"), 0) }}</td>
+      <td class="num">{{ d.severity_matrix.get((sev, "potential"), 0) }}</td>
+      <td class="num">{{ d.severity_matrix.get((sev, "unverified"), 0) }}</td>
+      <td class="num">{{ d.severity_matrix.get((sev, "rejected"), 0) }}</td>
+      <td class="num"><strong>{{ d.severity_row_totals[sev] }}</strong></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<div class="chart-row">
+  {{ severity_bar_chart(d.severity_counts, labels=SEVERITY_LABEL) }}
+  {% if d.type_distribution %}
+  <div>
+    {{ type_donut(d.type_distribution) }}
+    {{ type_legend(d.type_distribution) }}
+  </div>
+  {% endif %}
+</div>

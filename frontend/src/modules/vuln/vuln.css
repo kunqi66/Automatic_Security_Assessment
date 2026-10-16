@@ -1,0 +1,47 @@
+/*
+ * 漏洞视窗模块的局部样式。
+ *
+ * 只做两件 AntD 内联样式表达不了的事：
+ *  1. 表格行的选中/悬停高亮 —— 需求点名要用 `rowClassName`，
+ *     而 AntD 会把类名加在 <tr> 上，所以用后代选择器落到 <td> 才有效。
+ *  2. 等宽字体（路径、符号、代码片段）与深色代码块。
+ * 其余排版一律走 AntD 的 token / inline style，避免和全局主题打架。
+ */
+
+/* 选中行：浅蓝底 + 左侧蓝色竖条（颜色之外还有形状线索，不单靠颜色表意） */
+.vuln-row-selected > td {
+  background: #e6f4ff !important;
+}
+.vuln-row-selected > td:first-child {
+  box-shadow: inset 3px 0 0 #1677ff;
+}
+
+/* 悬停行（来自图谱 hover 或表格自身 hover）：浅黄底，与选中态明显区分 */
+.vuln-row-hovered > td {
+  background: #fffbe6 !important;
+}
+
+.vuln-mono {
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
+/* 污点步进里的代码片段：深色底，和 Monaco（vs-dark）保持同一视觉语言 */
+.vuln-code {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.vuln-diff-wrap {
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  overflow: hidden;
+}

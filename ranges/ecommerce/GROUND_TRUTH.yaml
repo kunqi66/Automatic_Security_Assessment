@@ -1,0 +1,250 @@
+# 靶场一：电商订单系统 —— 漏洞基准（PRD §10.4）
+#
+# 这份文件是**基准测试的分母**。它的唯一作用，是让"召回率"这个数字可核对：
+# 每一条都给出确切的行号与期望的探针技术，任何人可以照着复现一遍。
+#
+# ## 为什么行号是实测的，不是估的
+#
+# `line_start` / `line_end` 取自 `app.analysis.analyze_project()` 的**实际输出**
+# （配合 `ast` 的 `end_lineno` 核对语句边界），不是照着源码数出来的。
+# 理由很直接：基准测试要拿它去比 finding 的行号，基准自己先猜一个数，
+# 那比出来的"匹配率"就同时包含了分析器的误差与基准的误差，且无法区分。
+#
+# ## prd_id 的含义
+#
+# PRD §10.1 只规定了 4 个漏洞（V1–V4）。本靶场实际植入了 11 个 ——
+# 多出来的 7 个不是凑数，是**被探针契约逼出来的**：
+# B5 的探针表按漏洞类别给出固定路由（见 `app/verify/probe.py` 的 `PROBE_TEMPLATES`），
+# 一个类别没有对应的脆弱端点，那一类探针就永远只能落 `unverified`，
+# 于是攻击链的 R6（命令注入 → RCE）、R7（上传 → RCE）也就永远点不着。
+#
+# 所以 `prd_id: null` 的条目**同样是刻意的植入**，不是误报的样本。
+# 基准测试把它们一起计入分母，并在报告里把 PRD 的 8 条单列一次 ——
+# 两个数都给，读者自己判断。
+
+range: ecommerce
+prd_section: "PRD §10.1 靶场一：电商订单系统"
+stack: "Flask 3.0 + SQLite（容器内 /tmp）"
+source_root: "."
+
+vulnerabilities:
+  # ------------------------------------------------------------------
+  # V1：SQL 注入（PRD 指明的位置 + 探针契约要求的位置）
+  # ------------------------------------------------------------------
+  - id: ecommerce-sqli-search
+    prd_id: V1
+    name: 商品搜索 SQL 注入
+    category: sql_injection
+    file: app.py
+    line_start: 88
+    line_end: 90
+    expected_payload_technique: [union_extract, boolean_blind]
+    expected_response_pattern: "{nonce}"
+    cvss: 9.1
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+    detectable: static
+    note: >
+      `q` 直接拼进 WHERE 的**数值上下文**（`WHERE id = " + q`）。
+      这一点是被实测逼出来的：先写成 `LIKE '%...%'` 时，
+      UNION 载荷会落进引号里变成语法错误，布尔载荷两个分支又都返回空集、
+      没有长度差 —— 两种技术都验不了。数值上下文两种都能打。
+      SELECT 只有两列（`id, name || ' :: ' || description`），
+      与探针载荷的两列严格对齐。
+
+  - id: ecommerce-sqli-order-query
+    prd_id: V1
+    name: 订单查询 SQL 注入
+    category: sql_injection
+    file: app.py
+    line_start: 114
+    line_end: 116
+    expected_payload_technique: [union_extract, boolean_blind]
+    expected_response_pattern: "{nonce}"
+    cvss: 9.1
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+    detectable: static
+    note: >
+      PRD §10.1 表格里写的注入位置是 `/api/order/query`，就是这里。
+      但它**不是探针会去打的那个路由** —— `sqli` 的两条模板 `url_path`
+      都固定为 `/search`。这条 finding 会跑 `/search` 的探针并拿到 verified，
+      证据上的路由与 finding 的行号**不一致**。这是 B5 的已知边界，
+      详见 `app/verify/probe.py::_render` 的 docstring。
+
+  - id: ecommerce-sqli-admin-login
+    prd_id: V4
+    name: 管理后台登录 SQL 注入（认证绕过）
+    category: sql_injection
+    file: admin_login.py
+    line_start: 43
+    line_end: 49
+    expected_payload_technique: [union_extract, boolean_blind]
+    expected_response_pattern: "{nonce}"
+    cvss: 9.1
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+    detectable: static
+    note: >
+      PRD V4「认证绕过」在代码里的落点：`username` 拼接进
+      `SELECT role FROM users WHERE username = '...' AND password = '...'`。
+      它同时是攻击链 R2 所需的 `admin_login` **项目资产**的提供者 ——
+      R2 从 finding 的 `file_path`（含 `admin_login` 关键字）反查资产，
+      所以这个文件名不是随手起的。
+
+  # ------------------------------------------------------------------
+  # V2：文件上传
+  # ------------------------------------------------------------------
+  - id: ecommerce-file-upload
+    prd_id: V2
+    name: 文件上传未做后缀白名单与类型校验
+    category: file_upload
+    file: app.py
+    line_start: 152
+    line_end: 153
+    expected_payload_technique: [upload_marker]
+    expected_response_pattern: "{nonce}"
+    cvss: 8.8
+    cvss_vector: "AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:H"
+    detectable: static
+    note: >
+      `os.path.join(UPLOAD_DIR, uploaded.filename)` —— 文件名完全由调用方决定，
+      连 `secure_filename` 都没有。上传探针走真实的 multipart 体
+      （filename 在 `Content-Disposition` 里），再去 `/uploads/<name>` 回读 nonce。
+      **上传成功但打不出 RCE**：沙箱把 `/workspace` 只读挂载、`/tmp` 是 noexec 的
+      tmpfs，落地的文件没有执行路径。这正是 R7 标 `outcome_inferred=True` 的原因。
+
+  # ------------------------------------------------------------------
+  # 探针契约要求的额外植入点（PRD 未规定，但链路规则依赖）
+  # ------------------------------------------------------------------
+  - id: ecommerce-cmdi-ping
+    prd_id: null
+    name: 网络诊断命令注入
+    category: command_injection
+    file: app.py
+    line_start: 194
+    line_end: 196
+    expected_payload_technique: [time_blind, echo_nonce]
+    expected_response_pattern: "{nonce}"
+    cvss: 9.8
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    detectable: static
+    note: >
+      攻击链 R6（命令注入 → RCE）的唯一入口，也是全系统唯一一条
+      `outcome_inferred=False` 的链路 —— 时间盲注的 `sleep 3` 是**真的被执行了**，
+      不是推出来的。所以这个注入点缺失，等于链路上最硬的一环失效。
+
+  - id: ecommerce-traversal-uploads
+    prd_id: null
+    name: 上传目录回读路径穿越
+    category: path_traversal
+    file: app.py
+    line_start: 165
+    line_end: 165
+    expected_payload_technique: [path_traversal_read]
+    expected_response_pattern: "root:[x*]?:0:0:"
+    cvss: 7.5
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+    detectable: static
+    note: >
+      上传探针的 `aux_path` 是 `/uploads/asa{N}.txt`。这个路由本意只是回读上传件，
+      但它把 `<path:name>` 直接交给 `send_file` 拼接，于是它自己也是一个穿越点。
+
+  - id: ecommerce-traversal-file
+    prd_id: null
+    name: 文件读取路径穿越
+    category: path_traversal
+    file: app.py
+    line_start: 220
+    line_end: 221
+    expected_payload_technique: [path_traversal_read]
+    expected_response_pattern: "root:[x*]?:0:0:"
+    cvss: 7.5
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+    detectable: static
+    note: >
+      对应探针 `/api/file`。判据是读到 `/etc/passwd` 的 `root:x:0:0:` 形态。
+      三个文件路由都把 `OSError` 收敛成 404 而不是 500 —— 这是实测逼出来的：
+      500 会让连接停在半开状态，**紧接着的下一个请求会挂到超时**
+      （实测 `readme.txt` 在两次 500 之后等了 6014ms 才超时）。
+
+  - id: ecommerce-traversal-download
+    prd_id: null
+    name: 文件下载路径穿越
+    category: path_traversal
+    file: app.py
+    line_start: 241
+    line_end: 241
+    expected_payload_technique: [path_traversal_read]
+    expected_response_pattern: "^[a-f0-9]{12}$"
+    cvss: 7.5
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+    detectable: static
+    note: >
+      对应探针 `/api/download`，判据是读到 `/etc/hostname`（容器 ID，12 位十六进制）。
+      与上一条打的是同一类缺陷的两个不同出口 —— 保留两条是因为
+      `file_read` 这一类在探针表里就有两个 `url_path`。
+
+  - id: ecommerce-deserialization
+    prd_id: null
+    name: 反序列化不可信数据
+    category: deserialization
+    file: app.py
+    line_start: 290
+    line_end: 290
+    expected_payload_technique: [deser_marker]
+    expected_response_pattern: "{nonce}"
+    cvss: 9.8
+    cvss_vector: "AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    detectable: static
+    note: >
+      `pickle.loads` 作用于请求体。探针载荷是一个 `__reduce__` 返回
+      `(getattr, ("builtins", nonce))` 的对象 —— 它**只求值不改状态**，
+      被反序列化时把 nonce 抛进错误信息里，从而证明"这段字节真的被 unpickle 了"
+      而不需要在靶场里执行任何有副作用的代码。
+
+  # ------------------------------------------------------------------
+  # V3：硬编码密钥（同时是信息泄露探针的驱动源）
+  # ------------------------------------------------------------------
+  - id: ecommerce-hardcoded-secrets
+    prd_id: V3
+    name: 配置模块硬编码密钥
+    category: hardcoded_secret
+    file: config.py
+    line_start: 26
+    line_end: 32
+    expected_payload_technique: [read_config]
+    expected_response_pattern: "(SECRET_KEY|DB_PASSWORD|DATABASE_URL|API_KEY|PASSWORD|TOKEN)\\s*[:=]"
+    cvss: 5.5
+    cvss_vector: "AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+    detectable: static
+    note: >
+      4 处：`SECRET_KEY` / `DB_PASSWORD` / `API_KEY` / `ADMIN_TOKEN`。
+      静态检出的是"字面量密钥"这件事（5.5 分，本地利用）；
+      动态验证的是"它真的从 HTTP 漏出去了"（7.5 分）——
+      `hardcoded_secret` 在 `canonical_vuln_type` 里归一到 `info_disclosure`，
+      于是它会驱动 `read_config` 探针去打 `/.env` 与 `/debug/config`。
+      这两处端点在靶场里都存在，且 `render_env_file()` 刻意输出**纯文本** `KEY=value`
+      而不是 JSON —— JSON 的引号会让泄露正则匹配不上。
+
+  - id: ecommerce-hardcoded-admin-password
+    prd_id: V4
+    name: 管理后台口令硬编码
+    category: hardcoded_secret
+    file: admin_login.py
+    line_start: 23
+    line_end: 23
+    expected_payload_technique: [read_config]
+    expected_response_pattern: "(SECRET_KEY|DB_PASSWORD|DATABASE_URL|API_KEY|PASSWORD|TOKEN)\\s*[:=]"
+    cvss: 5.5
+    cvss_vector: "AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+    detectable: static
+    note: >
+      V4 的第二个落点。PRD 把 V4 描述为"认证绕过"，代码里有两条独立路径可以达成：
+      登录处的 SQL 注入，以及口令本身写死在源码里。
+
+# ---------------------------------------------------------------------
+# PRD §10.1 的 4 条与上面条目的对应关系
+# ---------------------------------------------------------------------
+prd_mapping:
+  V1: [ecommerce-sqli-search, ecommerce-sqli-order-query]
+  V2: [ecommerce-file-upload]
+  V3: [ecommerce-hardcoded-secrets]
+  V4: [ecommerce-sqli-admin-login, ecommerce-hardcoded-admin-password]

@@ -1,0 +1,73 @@
+# 评估 worker（systemd unit）
+#
+# 与 `asa-api.service` 的区别只在 ExecStart 与资源上限：
+# worker 干的是重活（tree-sitter 解析、起探针容器、渲染报告），
+# API 只是转发。两者的内存画像差一个数量级，所以配额也该分开。
+
+[Unit]
+Description=自动化安全评估系统 - 评估 worker（数据面）
+Documentation=file:/srv/asa/app/README.md
+After=network-online.target docker.service mysql.service
+Wants=network-online.target
+Requires=docker.service
+# worker 与 docker.service 是**硬依赖**：daemon 没了就没有沙箱，
+# 而一个没有沙箱的 worker 只会把每个评估的 poc_verify 阶段标成 skipped ——
+# 那是「看起来在跑、实际啥也没验」的状态，比直接停机更难发现。
+
+[Service]
+Type=exec
+User=asa
+Group=asa
+SupplementaryGroups=docker
+
+WorkingDirectory=/srv/asa/app/backend
+EnvironmentFile=/srv/asa/app/backend/.env
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONIOENCODING=utf-8
+
+ExecStart=/usr/local/bin/uv run --no-sync python -m app.worker
+
+# `KillSignal=SIGTERM` + 长 `TimeoutStopSec` 是配套的：
+# worker 收到 SIGTERM 后会把手上的评估跑完再退（见 `app/worker.py`），
+# 而这个「跑完」最长可能要一分钟以上。默认的 90 秒够用，
+# 但显式写出来是为了让「为什么停这么久」有据可查。
+KillSignal=SIGTERM
+TimeoutStopSec=180
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=3
+# 5 分钟内崩 3 次就停。worker 的崩溃几乎总是配置问题（依赖不可达、
+# Agent 注册不全），疯狂重启只会把同一个错误刷 500 遍。
+
+# --- 资源上限 ---
+# 比 API 宽：分析大项目时 tree-sitter 的 AST 会占掉不少，
+# 而单次评估本来就允许跑到 `assessment_timeout_seconds`（默认 1 小时）。
+# 但**仍然要有上限** —— 同一台机器上还有 Milvus 和 MySQL。
+MemoryMax=3G
+MemoryHigh=2500M
+CPUQuota=150%
+# worker 是这台机器上最重的 IO 使用者，给它正常权重即可；
+# 真正要压的是 API。
+IOWeight=100
+
+NoNewPrivileges=true
+# ⚠️ **worker 不能用 `PrivateTmp=true`**：它要把工作区路径作为
+# 绑定挂载传给 Docker daemon，而 daemon 在宿主机命名空间里解析这个路径。
+# 开了私有 tmp 之后，进程内看到的路径与 daemon 看到的不是同一个地方。
+PrivateTmp=false
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/asa
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=asa-worker
+
+[Install]
+WantedBy=multi-user.target

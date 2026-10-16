@@ -1,0 +1,27 @@
+{#- 单条攻击链（Markdown 版）。
+
+     **Q24 方案 A 的无颜色形态**：HTML 用实线/虚线描边区分，这里用 `[已验证]` /
+     `[已推演]` 文字前缀替代 —— 三格式口径一致，不能有一份格式把「推演」说成「验证」。 -#}
+### {{ chain.name | md_cell }}{% if chain.severity %}（{{ SEVERITY_LABEL[chain.severity] }}）{% endif %}
+
+- 入口点：{{ (chain.entry_point or "未记录") | md_cell }}
+- 攻陷目标：{{ (chain.target_asset or "未记录") | md_cell }}
+- 链置信度：{{ "%.2f"|format(chain.confidence) }}（由确定性推演规则给出）
+- 环数：{{ chain.verified_count }} 环已验证 / {{ chain.inferred_count }} 环已推演
+{% if chain.description %}- 链路概述：{{ chain.description | md_text }}
+{% endif %}
+{% if chain.narrative %}
+**攻击链叙事**{% if chain.narrative_degraded %}（模板生成）{% endif %}
+
+{{ chain.narrative | md_text }}
+{% endif %}
+**逐环推演**
+
+| # | 标记 | 环节 | 节点类型 | 说明 |
+|---:|---|---|---|---|
+{% for node in chain.nodes -%}
+| {{ node.order_index + 1 }} | {{ node.mark }} | {{ node.label | md_cell }}{% if node.vuln_code %}（`{{ node.vuln_code }}`）{% endif %} | {{ node.node_type }} | {{ (node.detail or "—") | md_cell }}{% if node.rule_id %}（规则 {{ node.rule_id }}）{% endif %} |
+{% endfor %}
+{% if chain.verification_footnote %}
+脚注：{{ chain.verification_footnote }}
+{% endif %}

@@ -1,0 +1,130 @@
+{#- 单条漏洞卡片（HTML）。每一条都**如实标注它的证据强度**：
+     status（验证到什么程度）、guard_blocked（是否被闸门拦过）、
+     cvss_estimated（评分是否来自代入值）、data_incomplete（字段是否缺失）。
+     这些标注的存在使报告「可被质疑」—— 而一份不能被质疑的报告没有价值。 -#}
+<div class="card">
+  <header>
+    <h3>
+      <code>{{ v.code }}</code> {{ v.title }}
+      <span class="badge badge-{{ v.severity }}">{{ v.severity_cn }}</span>
+      <span class="badge badge-{{ 'verified' if v.status == 'verified' else 'unverified' }}">{{ v.status_cn }}</span>
+      {% if v.guard_blocked %}<span class="badge badge-inferred">存在净化/闸门记录</span>{% endif %}
+    </h3>
+  </header>
+
+  <table>
+    <tbody>
+      <tr><th style="width:130px">漏洞类型</th><td>{{ v.type_label }}（<code>{{ v.vuln_type }}</code>）</td></tr>
+      <tr>
+        <th>CVSS</th>
+        <td>
+          {{ "%.1f"|format(v.cvss_score) }}
+          {%- if v.cvss_vector %} <code>{{ v.cvss_vector }}</code>{% endif %}
+          {%- if v.cvss_estimated %} <span style="color:#b45309">（该值由漏洞严重度中位值代入，原始记录缺失 CVSS —— 评分不完整）</span>{% endif %}
+        </td>
+      </tr>
+      <tr><th>触发位置</th><td><code>{{ v.file_path }}:{{ v.line_start }}-{{ v.line_end }}</code>{% if v.sink_symbol %} · 下沉符号 <code>{{ v.sink_symbol }}</code>{% endif %}</td></tr>
+      <tr><th>检测方式</th><td><code>{{ v.detection_method }}</code> · 置信度 {{ "%.2f"|format(v.confidence) }}（由确定性规则给出，非概率）</td></tr>
+      <tr><th>验证状态</th><td>{{ v.status_cn }}</td></tr>
+      {% if v.data_incomplete %}
+      <tr><th>数据完整性</th><td style="color:#b45309">本条存在字段缺失（如无 CVSS、无污点路径或无探针记录），以下为已记录的部分</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  {% if v.description %}
+  <h3>漏洞描述</h3>
+  <p>{{ v.description }}</p>
+  {% endif %}
+
+  {% if v.taint_path %}
+  <h3>污点路径</h3>
+  <table class="taint-table">
+    <thead>
+      <tr><th style="width:50px" class="num">#</th><th style="width:90px">环节</th><th style="width:200px">位置</th><th style="width:150px">符号</th><th>源码片段</th></tr>
+    </thead>
+    <tbody>
+      {% for step in v.taint_path %}
+      <tr>
+        <td class="num">{{ step.step_index + 1 }}</td>
+        <td class="kind">{{ step.step_type }}</td>
+        <td><code>{{ step.file_path }}:{{ step.line }}</code></td>
+        <td>{% if step.symbol %}<code>{{ step.symbol }}</code>{% endif %}</td>
+        <td>{% if step.code_snippet %}<code>{{ step.code_snippet }}</code>{% endif %}{% if step.note %}<br><small>{{ step.note }}</small>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p style="color:#6b7280">未记录到污点路径（本条为模式匹配命中，报告中不给出未经证实的数据流描述）。</p>
+  {% endif %}
+
+  {% if v.poc %}
+  <h3>动态验证证据</h3>
+  <div class="evidence">
+    <p>
+      <span class="label">手法</span>{{ v.poc.technique or "未记录" }}
+      <span class="label" style="margin-left:14px">载荷匹配</span>{{ "命中" if v.poc.matched else "未命中" }}
+      {% if v.poc.http_status is not none %}<span class="label" style="margin-left:14px">HTTP</span>{{ v.poc.http_status }}{% endif %}
+      {% if v.poc.elapsed_ms is not none %}<span class="label" style="margin-left:14px">耗时</span>{{ v.poc.elapsed_ms }} ms{% endif %}
+    </p>
+    <p><span class="label">载荷</span></p>
+    <pre><code>{{ v.poc.payload }}</code></pre>
+    {% if v.poc.expected_pattern %}
+    <p><span class="label">判定依据（nonce 匹配）</span><code>{{ v.poc.expected_pattern }}</code></p>
+    {% endif %}
+    {% if v.poc.request_raw %}
+    <p><span class="label">请求报文</span></p>
+    <pre><code>{{ v.poc.request_raw }}</code></pre>
+    {% endif %}
+    {% if v.poc.response_raw %}
+    <p><span class="label">响应报文（截断）</span></p>
+    <pre><code>{{ v.poc.response_raw }}</code></pre>
+    {% endif %}
+    {#- 证据强度提示。放在证据块的**末尾**而不是开头：先给事实，再给读法。
+        两种强度必须分开写 —— 写成同一句话正是本项目修掉的那个缺陷。 -#}
+    {% if v.poc.bound_to_finding %}
+    <p style="color:#166534;font-size:12.5px;margin-top:10px">
+      <strong>证据强度：逐点确认。</strong>探针由本条的污点路径<strong>反查出了自己的端点</strong>
+      （路由、参数名、注入位置均取自源码），因此上方请求报文打的就是本条的触发位置。
+      请核对报文路径与本条触发位置所属的路由是否一致。
+    </p>
+    {% else %}
+    <p style="color:#b45309;font-size:12.5px;margin-top:10px">
+      <strong>证据强度：仅类别级。</strong>探针打在该类漏洞的<strong>标准形态路由</strong>上
+      （路由由探针模板给定，不由本条目决定）—— 本条<strong>未能从源码反查出自己的端点</strong>，
+      故上述命中证明的是「这一类漏洞在本目标上存在」，<strong>不等于</strong>
+      「本行所在的端点已被打通」。请比对报文路径与本条的触发位置：二者不同则不是同一件事。
+    </p>
+    {% endif %}
+  </div>
+  {% else %}
+  {#- 「没有证据」本身也是要写清楚的一格。空着会被读成「这里没问题」，
+      而它实际可能是「试了但被拦下」、「根本没试」或「试了但打不通」——
+      三件事必须分开说，否则读者只能自己猜。 -#}
+  <h3>动态验证证据</h3>
+  {% if v.guard_blocked %}
+  <p style="color:#6b7280">
+    本次针对本条的探针尝试<strong>全部被无害化闸门拦下</strong>。被拦下证明的是
+    「这次尝试被拦住了」，不能作为「这里能打」的证据，因此不在此处展示；
+    它同样<strong>不等于</strong>「这里打不了」。本条的验证状态仍为
+    「{{ v.status_cn }}」，请以静态分析结论为准并另行补充验证。
+  </p>
+  {% elif v.status == "rejected" %}
+  <p style="color:#6b7280">
+    本条的<strong>机器动态验证未复现</strong>：无害化探针执行了，但没有取得证据。
+    这<strong>不等于</strong>误报已经确认 —— 探针打在模板固定的路由上，
+    若本条的注入点不在此路由，「打不到」与「打不穿」在探针结果里长得一模一样。
+    <strong>该结论未经人工确认，处置前请人工复核。</strong>
+  </p>
+  {% else %}
+  <p style="color:#6b7280">
+    本条<strong>没有可展示的探针记录</strong>：未生成有效探针，或 <code>poc_verify</code> 阶段被跳过。
+    以下结论全部来自静态分析 —— 它说明「数据流未经过有效净化」已被确认，
+    但「能否被真正利用」尚未验证。
+  </p>
+  {% endif %}
+  {% endif %}
+
+  {% include "partials/patch_block.j2" %}
+</div>

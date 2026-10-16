@@ -1,0 +1,43 @@
+{#- 补丁块。**绝不自动应用** —— 由开发者复核后手动采纳（需求 2.5.2）。
+
+     四道校验逐道展示（总纲 §8.5）：只给一个总布尔值的话，读者无法区分
+     「diff 格式都不对」与「格式对、打上之后污点路径仍然存在」—— 而这两件事
+     对修复者的意义完全不同（前者要重写补丁，后者说明补丁没修到根因）。
+     未过校验的补丁（source=validate_failed）必须显式标注为**人工参考**，不能
+     让人以为它是可用的修复。 -#}
+{% if v.patch %}
+<h3>修复补丁（草案，须人工复核后手动应用）</h3>
+<table>
+  <tbody>
+    <tr><th style="width:130px">目标文件</th><td><code>{{ v.patch.target_file }}</code></td></tr>
+    <tr><th>产出源</th>
+      <td>
+        {%- if v.patch.source == "llm" -%}
+          大语言模型生成{% if v.patch.llm_model %}（<code>{{ v.patch.llm_model }}</code>）{% endif %}
+        {%- elif v.patch.source == "template" -%}
+          确定性模板生成
+        {%- else -%}
+          <span style="color:#b45309">四道校验未通过，已降级为人工参考</span>
+        {%- endif -%}
+      </td>
+    </tr>
+    <tr><th>处置状态</th><td>{{ v.patch.status }}</td></tr>
+    <tr>
+      <th>四道校验</th>
+      <td>
+        <span class="badge {{ 'badge-low' if v.patch.valid_diff else 'badge-critical' }}">① 合法 unified diff：{{ "通过" if v.patch.valid_diff else "未通过" }}</span>
+        <span class="badge {{ 'badge-low' if v.patch.window_ok else 'badge-critical' }}">② ±20 行窗口：{{ "通过" if v.patch.window_ok else "未通过" }}</span>
+        <span class="badge {{ 'badge-low' if v.patch.apply_check_ok else 'badge-critical' }}">③ git apply 干跑：{{ "通过" if v.patch.apply_check_ok else "未通过" }}</span>
+        <span class="badge {{ 'badge-low' if v.patch.taint_cleared else 'badge-critical' }}">④ 污点路径消失：{{ "通过" if v.patch.taint_cleared else "未通过" }}</span>
+      </td>
+    </tr>
+    {% if v.patch.failure_reason %}
+    <tr><th>未通过原因</th><td>{{ v.patch.failure_reason }}</td></tr>
+    {% endif %}
+    {% if v.patch.rationale %}
+    <tr><th>补充说明</th><td>{{ v.patch.rationale }}</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+<pre><code>{{ v.patch.diff }}</code></pre>
+{% endif %}
